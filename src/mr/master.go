@@ -20,24 +20,29 @@ type Master struct {
 	NAllJobs      int
 	NFreeJobs     int
 	NFinishedJobs int
-	States        map[string]string
+	States        map[int]string
 	ReduceStates  map[int]string
 
 	OutstdngReqs int // used in Done()
+	//mutex        sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
 func (m *Master) TaskReqHandler(args *TaskReqArgs, reply *TaskReqReply) error {
+	//m.mutex.Lock()
 	m.OutstdngReqs += 1
+	//m.mutex.Unlock()
 	for {
 		if m.NFreeJobs > 0 { // Give task when there is a free job.
 			if m.Phase == "Map" {
-				for fileName, state := range m.States {
+				for taskNum, state := range m.States {
 					if state == "free" {
 						reply.TaskType = m.Phase
-						reply.FileName = fileName
+						reply.FileName = m.Files[taskNum]
+						reply.MapTaskNum = taskNum
+						reply.MapNReduces = m.NReduce
 						m.NFreeJobs -= 1
-						m.States[fileName] = "in-progress"
+						m.States[taskNum] = "in-progress"
 						m.OutstdngReqs -= 1
 						return nil
 					}
@@ -75,7 +80,7 @@ func (m *Master) TaskFinHandler(args *TaskFinArgs, reply *TaskFinReply) error {
 		return nil
 	}
 	if m.Phase == "Map" {
-		m.States[args.FileName] = "finished"
+		m.States[args.MapTaskNum] = "finished"
 	} else {
 		m.ReduceStates[args.ReduceTaskNum] = "finished"
 	}
@@ -91,7 +96,7 @@ func (m *Master) TaskFinHandler(args *TaskFinArgs, reply *TaskFinReply) error {
 			m.NAllJobs = m.NReduce
 			m.NFinishedJobs = 0
 			m.NFreeJobs = m.NAllJobs
-			for i := 1; i <= m.NReduce; i++ {
+			for i := 0; i < m.NReduce; i++ {
 				m.ReduceStates[i] = "free"
 			}
 			m.Phase = "Reduce"
@@ -159,9 +164,10 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m.NAllJobs = m.NMap
 	m.NFinishedJobs = 0
 	m.NFreeJobs = m.NAllJobs
-	// m.States = make(map[string]string)
-	for _, fileName := range m.Files {
-		m.States[fileName] = "free"
+	m.States = make(map[int]string)
+	m.ReduceStates = make(map[int]string)
+	for i := 0; i < m.NMap; i++ {
+		m.States[i] = "free"
 	}
 	m.Phase = "Map"
 	m.OutstdngReqs = 0
