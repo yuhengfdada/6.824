@@ -30,13 +30,16 @@ type TaskReqArgs struct {
 }
 
 type TaskReqReply struct {
-	TaskType string
-	FileName string // Map: the raw input filename. Reduce: the json KV pairs filename.
+	TaskType      string // Map or Reduce or "Please exit"
+	FileName      string // Map: the raw input filename.
+	ReduceTaskNum int    // Reduce: the reduce task number.
+	ReduceNMaps   int    // Reduce: number of intermediate files per reduce task.
 }
 
 // Task finished RPC.
 type TaskFinArgs struct {
-	FileName string
+	FileName      string // for Map
+	ReduceTaskNum int    // for reduce
 }
 
 type TaskFinReply struct {
