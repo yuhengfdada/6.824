@@ -1,18 +1,65 @@
 package mr
 
-import "log"
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
-
+import (
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
+	"time"
+)
 
 type Master struct {
 	// Your definitions here.
+	Phase   string // Map or Reduce or Done
+	Files   []string
+	NMap    int
+	NReduce int
 
+	NAllJobs      int
+	NFreeJobs     int
+	NFinishedJobs int
+	States        map[string]string
 }
 
 // Your code here -- RPC handlers for the worker to call.
+func (m *Master) TaskReqHandler(args *TaskReqArgs, reply *TaskReqReply) error {
+	for {
+		if m.NFreeJobs > 0 { // Give task when there is a free job.
+			for fileName, state := range m.States {
+				if state == "free" {
+					reply.TaskType = m.Phase
+					reply.FileName = fileName
+					m.NFreeJobs -= 1
+					m.States[fileName] = "in-progress"
+					return nil
+				}
+			}
+		} else { // When no free task, wait.
+			if m.Phase == "Done" { // If everything is done, tell the workers to exit.
+				reply.TaskType = "Please exit"
+				reply.FileName = nil
+				return nil
+			} else {
+				time.Sleep(3)
+			}
+		}
+	}
+	return nil
+}
+
+func (m *Master) TaskFinHandler(args *TaskFinArgs, reply *TaskFinReply) error {
+	// Update master metadata.
+	m.States[args.FileName] = "finished"
+	m.NFinishedJobs += 1
+	// check whether the phase has finished.
+	if m.NAllJobs == m.NFinishedJobs {
+		if m.Phase == "Map" {
+
+		}
+	}
+
+}
 
 //
 // an example RPC handler.
@@ -23,7 +70,6 @@ func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
 }
-
 
 //
 // start a thread that listens for RPCs from worker.go
@@ -49,8 +95,9 @@ func (m *Master) Done() bool {
 	ret := false
 
 	// Your code here.
-
-
+	if m.Phase == "Done" {
+		ret = true
+	}
 	return ret
 }
 
@@ -63,7 +110,10 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{}
 
 	// Your code here.
-
+	// Master Initialization.
+	m.Files = files
+	m.NReduce = nReduce
+	m.LatestWID = 0
 
 	m.server()
 	return &m
