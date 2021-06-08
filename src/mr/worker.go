@@ -82,12 +82,13 @@ func doMap(mapf func(string, string) []KeyValue, filename string, MapNReduces in
 	}
 	for reduceTN, kvs := range tasks {
 		outFileName := "mr-" + strconv.Itoa(mapTN) + "-" + strconv.Itoa(reduceTN)
-		file, _ := os.Create(outFileName) // neglect error :)
-		enc := json.NewEncoder(file)
+		tfile, _ := ioutil.TempFile("", "*")
+		enc := json.NewEncoder(tfile)
 		// write an intermediate file.
 		for _, kv := range kvs {
 			enc.Encode(&kv)
 		}
+		os.Rename(tfile.Name(), outFileName)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -24,15 +25,17 @@ type Master struct {
 	ReduceStates  map[int]string
 
 	OutstdngReqs int // used in Done()
-	//mutex        sync.Mutex
+	mutex        sync.Mutex
+	Timers       map[int]*time.Timer
 }
 
 // Your code here -- RPC handlers for the worker to call.
 func (m *Master) TaskReqHandler(args *TaskReqArgs, reply *TaskReqReply) error {
-	//m.mutex.Lock()
+	m.mutex.Lock()
 	m.OutstdngReqs += 1
-	//m.mutex.Unlock()
+	m.mutex.Unlock()
 	for {
+		m.mutex.Lock()
 		if m.NFreeJobs > 0 { // Give task when there is a free job.
 			if m.Phase == "Map" {
 				for taskNum, state := range m.States {
@@ -43,7 +46,18 @@ func (m *Master) TaskReqHandler(args *TaskReqArgs, reply *TaskReqReply) error {
 						reply.MapNReduces = m.NReduce
 						m.NFreeJobs -= 1
 						m.States[taskNum] = "in-progress"
+						m.Timers[taskNum] = time.NewTimer(10 * time.Second)
+						go func(mm *Master, tN int) {
+							<-mm.Timers[tN].C
+							mm.mutex.Lock()
+							if mm.States[tN] == "in-progress" {
+								mm.States[tN] = "free"
+								mm.NFreeJobs += 1
+							}
+							mm.mutex.Unlock()
+						}(m, taskNum)
 						m.OutstdngReqs -= 1
+						m.mutex.Unlock()
 						return nil
 					}
 				}
@@ -56,7 +70,18 @@ func (m *Master) TaskReqHandler(args *TaskReqArgs, reply *TaskReqReply) error {
 						reply.ReduceNMaps = m.NMap
 						m.NFreeJobs -= 1
 						m.ReduceStates[taskNum] = "in-progress"
+						m.Timers[taskNum] = time.NewTimer(10 * time.Second)
+						go func(mm *Master, tN int) {
+							<-mm.Timers[tN].C
+							mm.mutex.Lock()
+							if mm.ReduceStates[tN] == "in-progress" {
+								mm.ReduceStates[tN] = "free"
+								mm.NFreeJobs += 1
+							}
+							mm.mutex.Unlock()
+						}(m, taskNum)
 						m.OutstdngReqs -= 1
+						m.mutex.Unlock()
 						return nil
 					}
 				}
@@ -66,8 +91,10 @@ func (m *Master) TaskReqHandler(args *TaskReqArgs, reply *TaskReqReply) error {
 				reply.TaskType = "Please exit"
 				reply.FileName = ""
 				m.OutstdngReqs -= 1
+				m.mutex.Unlock()
 				return nil
 			} else {
+				m.mutex.Unlock() // give chance to other threads
 				time.Sleep(3 * time.Second)
 			}
 		}
@@ -76,7 +103,9 @@ func (m *Master) TaskReqHandler(args *TaskReqArgs, reply *TaskReqReply) error {
 
 func (m *Master) TaskFinHandler(args *TaskFinArgs, reply *TaskFinReply) error {
 	// Update master metadata.
+	m.mutex.Lock()
 	if m.Phase == "Done" {
+		m.mutex.Unlock()
 		return nil
 	}
 	if m.Phase == "Map" {
@@ -104,6 +133,7 @@ func (m *Master) TaskFinHandler(args *TaskFinArgs, reply *TaskFinReply) error {
 			m.Phase = "Done"
 		}
 	}
+	m.mutex.Unlock()
 	return nil
 }
 
@@ -169,6 +199,7 @@ func MakeMaster(files []string, nReduce int) *Master {
 	for i := 0; i < m.NMap; i++ {
 		m.States[i] = "free"
 	}
+	m.Timers = make(map[int]*time.Timer)
 	m.Phase = "Map"
 	m.OutstdngReqs = 0
 
